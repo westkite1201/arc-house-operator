@@ -1,0 +1,15 @@
+official_sources:
+  community_base: https://community.arc.io
+  content: https://community.arc.io/en/public/content
+  rules: https://community.arc.io/public/contributors/contribution-rules
+  token_whitepaper: https://www.arc.io/arc-token-whitepaper
+  rpc: https://rpc.testnet.arc.network
+  faucet: https://faucet.circle.com/
+  explorer: https://testnet.arcscan.app
+safety:
+  allow_browser_open: true
+  allow_wallet_connect: false
+  allow_signing: false
+  allow_captcha_faucet_automation: false
+  allow_posting_commenting: false
+  allow_points_api_calls: false
