@@ -30,7 +30,7 @@ PROFILE_DIR = Path(os.environ.get("ARC_HOUSE_BROWSER_PROFILE", str(DEFAULT_PROFI
 HTML_OUT = STATE_DIR / "arc_house_today_links.html"
 COMPLETIONS_PATH = STATE_DIR / "completions.json"
 
-SAFETY_NOTE = """Safe helper only: opens official Arc/Circle public pages for manual operation/page-walk.\nNo wallet connect/sign, no CAPTCHA/faucet automation, no posting/commenting, no points API spoofing.\n"""
+SAFETY_NOTE = """Safe helper only: one operator account + one persistent browser profile; opens official Arc/Circle public pages for manual operation/page-walk.\nNo wallet connect/sign, no CAPTCHA/faucet automation, no posting/commenting, no points API spoofing, no account/wallet/proxy rotation.\n"""
 
 
 def utc_now() -> str:
@@ -96,7 +96,7 @@ def write_html(links: list[dict[str, str]]) -> Path:
 <title>Arc House supervised queue</title>
 <style>body{font-family:system-ui;background:#0b0b11;color:#eee;max-width:920px;margin:40px auto;line-height:1.5}a{color:#7db7ff}li{margin:16px 0;padding:12px;border:1px solid #333;border-radius:10px;background:#15151d}.warn{color:#ffb45b}small{color:#999}</style>
 <h1>Arc House supervised queue</h1>
-<p class='warn'>공식 링크만 열어 읽기/시청하세요. 지갑 연결, 서명, CAPTCHA, faucet, posting/commenting, claim/airdrop checker 자동화 금지.</p>
+<p class='warn'>공식 링크만 열어 읽기/시청하세요. 단일 운영 계정/단일 브라우저 프로필 기준입니다. 지갑 연결, 서명, CAPTCHA, faucet, posting/commenting, 계정·지갑·프록시 순환, claim/airdrop checker 자동화 금지.</p>
 <ol>
 """
         + "\n".join(rows)

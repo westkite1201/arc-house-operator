@@ -22,6 +22,8 @@ def test_supervised_html_queue_contains_safety_copy(tmp_path, monkeypatch):
     ])
     text = out.read_text()
     assert "지갑 연결" in text
+    assert "단일 운영 계정" in text
+    assert "계정·지갑·프록시 순환" in text
     assert "Safe Official Link" in text
     assert "https://community.arc.io/en/public/blogs/a" in text
 
@@ -31,6 +33,8 @@ def test_safety_note_rejects_risky_automation_language():
     assert "no wallet connect" in note
     assert "no captcha" in note
     assert "no points api" in note
+    assert "one operator account" in note
+    assert "no account/wallet/proxy rotation" in note
 
 
 def test_completion_tracking_round_trip(tmp_path, monkeypatch):
