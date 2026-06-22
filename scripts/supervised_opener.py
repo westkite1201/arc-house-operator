@@ -4,14 +4,17 @@
 Safe boundary: public official pages only. It may open Arc House content tabs in a
 persistent Chromium profile so the operator can log in and manually read/watch.
 It never automates wallet connect, signatures, CAPTCHA/faucet, posting, comments,
-claim links, or private APIs.
+claim links, or private/points APIs.
 """
 from __future__ import annotations
 
 import argparse
 import html
+import json
+import os
 import sys
 import time
+from datetime import datetime, timezone
 from pathlib import Path
 
 SCRIPT_DIR = Path(__file__).resolve().parent
@@ -22,11 +25,16 @@ from daily_report import BASE, CONTENT_URL, fetch, extract_content  # noqa: E402
 REPO_ROOT = Path(__file__).resolve().parents[1]
 DEFAULT_STATE_DIR = REPO_ROOT / "state"
 DEFAULT_PROFILE_DIR = REPO_ROOT / ".browser-profiles/arc-house"
-STATE_DIR = Path(__import__("os").environ.get("ARC_HOUSE_STATE_DIR", str(DEFAULT_STATE_DIR)))
-PROFILE_DIR = Path(__import__("os").environ.get("ARC_HOUSE_BROWSER_PROFILE", str(DEFAULT_PROFILE_DIR)))
+STATE_DIR = Path(os.environ.get("ARC_HOUSE_STATE_DIR", str(DEFAULT_STATE_DIR)))
+PROFILE_DIR = Path(os.environ.get("ARC_HOUSE_BROWSER_PROFILE", str(DEFAULT_PROFILE_DIR)))
 HTML_OUT = STATE_DIR / "arc_house_today_links.html"
+COMPLETIONS_PATH = STATE_DIR / "completions.json"
 
-SAFETY_NOTE = """Safe helper only: opens official Arc/Circle public pages for manual operation.\nNo wallet connect/sign, no CAPTCHA/faucet automation, no posting/commenting, no points API spoofing.\n"""
+SAFETY_NOTE = """Safe helper only: opens official Arc/Circle public pages for manual operation/page-walk.\nNo wallet connect/sign, no CAPTCHA/faucet automation, no posting/commenting, no points API spoofing.\n"""
+
+
+def utc_now() -> str:
+    return datetime.now(timezone.utc).replace(microsecond=0).isoformat()
 
 
 def collect_links(read_limit: int, video_limit: int) -> list[dict[str, str]]:
@@ -37,19 +45,58 @@ def collect_links(read_limit: int, video_limit: int) -> list[dict[str, str]]:
     return reads[:read_limit] + videos[:video_limit]
 
 
+def load_completions(path: Path = COMPLETIONS_PATH) -> dict[str, dict[str, str]]:
+    try:
+        return json.loads(path.read_text(encoding="utf-8"))
+    except Exception:
+        return {}
+
+
+def save_completions(completions: dict[str, dict[str, str]], path: Path = COMPLETIONS_PATH) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(json.dumps(completions, ensure_ascii=False, indent=2, sort_keys=True), encoding="utf-8")
+
+
+def mark_completed(item: dict[str, str], mode: str, completions: dict[str, dict[str, str]] | None = None) -> dict[str, str]:
+    completions = completions if completions is not None else load_completions()
+    record = {
+        "title": item["title"],
+        "type": item["type"],
+        "url": item["url"],
+        "completed_at": utc_now(),
+        "mode": mode,
+    }
+    completions[item["url"]] = record
+    save_completions(completions)
+    return record
+
+
+def pending_links(links: list[dict[str, str]], completions: dict[str, dict[str, str]] | None = None) -> list[dict[str, str]]:
+    completions = completions if completions is not None else load_completions()
+    return [item for item in links if item["url"] not in completions]
+
+
 def write_html(links: list[dict[str, str]]) -> Path:
     STATE_DIR.mkdir(parents=True, exist_ok=True)
+    completions = load_completions()
     rows = []
     for idx, item in enumerate(links, 1):
         title = html.escape(item["title"])
         url = html.escape(item["url"])
-        rows.append(f'<li><b>{idx}. [{item["type"]}] {title}</b><br><a href="{url}" target="_blank" rel="noreferrer">{url}</a></li>')
+        done = completions.get(item["url"])
+        status = "✅ done" if done else "⬜ pending"
+        rows.append(
+            f'<li><b>{idx}. {status} [{item["type"]}] {title}</b><br>'
+            f'<a href="{url}" target="_blank" rel="noreferrer">{url}</a>'
+            f'{"<br><small>completed_at=" + html.escape(done.get("completed_at", "")) + " mode=" + html.escape(done.get("mode", "")) + "</small>" if done else ""}'
+            "</li>"
+        )
     HTML_OUT.write_text(
         """<!doctype html><meta charset='utf-8'>
 <title>Arc House supervised queue</title>
-<style>body{font-family:system-ui;background:#0b0b11;color:#eee;max-width:920px;margin:40px auto;line-height:1.5}a{color:#7db7ff}li{margin:16px 0;padding:12px;border:1px solid #333;border-radius:10px;background:#15151d}.warn{color:#ffb45b}</style>
+<style>body{font-family:system-ui;background:#0b0b11;color:#eee;max-width:920px;margin:40px auto;line-height:1.5}a{color:#7db7ff}li{margin:16px 0;padding:12px;border:1px solid #333;border-radius:10px;background:#15151d}.warn{color:#ffb45b}small{color:#999}</style>
 <h1>Arc House supervised queue</h1>
-<p class='warn'>공식 링크만 수동으로 열어 읽기/시청하세요. 지갑 연결, 서명, CAPTCHA, faucet, posting/commenting, claim/airdrop checker 자동화 금지.</p>
+<p class='warn'>공식 링크만 열어 읽기/시청하세요. 지갑 연결, 서명, CAPTCHA, faucet, posting/commenting, claim/airdrop checker 자동화 금지.</p>
 <ol>
 """
         + "\n".join(rows)
@@ -59,21 +106,27 @@ def write_html(links: list[dict[str, str]]) -> Path:
     return HTML_OUT
 
 
-def open_browser(links: list[dict[str, str]], headed: bool, slow_ms: int) -> None:
-    try:
-        from playwright.sync_api import sync_playwright
-    except Exception as exc:  # pragma: no cover
-        raise RuntimeError("playwright_missing") from exc
+def _launch_context(headed: bool, slow_ms: int):
+    from playwright.sync_api import sync_playwright
 
     PROFILE_DIR.mkdir(parents=True, exist_ok=True)
-    with sync_playwright() as p:
-        context = p.chromium.launch_persistent_context(
-            user_data_dir=str(PROFILE_DIR),
-            headless=not headed,
-            executable_path="/usr/bin/chromium-browser",
-            slow_mo=slow_ms,
-            args=["--no-sandbox", "--disable-dev-shm-usage"],
-        )
+    p = sync_playwright().start()
+    context = p.chromium.launch_persistent_context(
+        user_data_dir=str(PROFILE_DIR),
+        headless=not headed,
+        executable_path="/usr/bin/chromium-browser",
+        slow_mo=slow_ms,
+        args=["--no-sandbox", "--disable-dev-shm-usage"],
+    )
+    return p, context
+
+
+def open_browser(links: list[dict[str, str]], headed: bool, slow_ms: int) -> None:
+    try:
+        p, context = _launch_context(headed=headed, slow_ms=slow_ms)
+    except Exception as exc:  # pragma: no cover
+        raise RuntimeError("playwright_or_chromium_missing") from exc
+    try:
         page = context.new_page()
         page.goto(BASE, wait_until="domcontentloaded", timeout=45_000)
         for item in links:
@@ -84,7 +137,49 @@ def open_browser(links: list[dict[str, str]], headed: bool, slow_ms: int) -> Non
         print(SAFETY_NOTE.strip())
         if headed:
             input("Manual browser is open. Press Enter here only after you finish and want to close it... ")
+    finally:
         context.close()
+        p.stop()
+
+
+def auto_walk(links: list[dict[str, str]], headed: bool, slow_ms: int, read_seconds: int, video_seconds: int, mark: bool) -> None:
+    """Sequentially visit official links with the persistent profile.
+
+    This is not event spoofing: it only loads the public content page and waits.
+    If mark=True, local completion state records that the operator-run page walk was attempted.
+    """
+    try:
+        p, context = _launch_context(headed=headed, slow_ms=slow_ms)
+    except Exception as exc:  # pragma: no cover
+        raise RuntimeError("playwright_or_chromium_missing") from exc
+    completions = load_completions()
+    try:
+        page = context.new_page()
+        page.goto(BASE, wait_until="domcontentloaded", timeout=45_000)
+        for idx, item in enumerate(links, 1):
+            wait_s = video_seconds if item["type"] == "video" else read_seconds
+            print(f"auto_walk {idx}/{len(links)} [{item['type']}] wait={wait_s}s {item['title']}")
+            page.goto(item["url"], wait_until="domcontentloaded", timeout=60_000)
+            time.sleep(max(0, wait_s))
+            if mark:
+                mark_completed(item, mode="auto_walk_page_visit", completions=completions)
+                print(f"marked_complete {item['url']}")
+        save_completions(completions)
+    finally:
+        context.close()
+        p.stop()
+
+
+def interactive_walk(links: list[dict[str, str]]) -> None:
+    completions = load_completions()
+    for idx, item in enumerate(links, 1):
+        print(f"\n{idx}/{len(links)} [{item['type']}] {item['title']}\n{item['url']}")
+        answer = input("완료했으면 Enter, skip은 s 입력: ").strip().lower()
+        if answer == "s":
+            continue
+        mark_completed(item, mode="operator_confirmed", completions=completions)
+        print("marked_complete")
+    save_completions(completions)
 
 
 def main() -> int:
@@ -94,18 +189,31 @@ def main() -> int:
     ap.add_argument("--browser", action="store_true", help="open Chromium tabs with a persistent Arc profile")
     ap.add_argument("--headed", action="store_true", help="show Chromium UI; requires a display/VNC")
     ap.add_argument("--slow-ms", type=int, default=150)
+    ap.add_argument("--skip-completed", action="store_true", help="only include links not present in completions.json")
+    ap.add_argument("--interactive", action="store_true", help="prompt operator to mark each link complete")
+    ap.add_argument("--auto-walk", action="store_true", help="sequentially visit official links and wait; does not spoof APIs")
+    ap.add_argument("--mark-complete", action="store_true", help="with --auto-walk, locally mark visited links complete")
+    ap.add_argument("--read-seconds", type=int, default=45)
+    ap.add_argument("--video-seconds", type=int, default=180)
     args = ap.parse_args()
 
     links = collect_links(args.read_limit, args.video_limit)
+    if args.skip_completed:
+        links = pending_links(links)
     html_path = write_html(links)
     print(f"Arc House supervised queue ready: {html_path}")
-    print(f"links={len(links)}")
+    print(f"links={len(links)} pending={len(pending_links(links))}")
     for idx, item in enumerate(links, 1):
-        print(f"{idx}. [{item['type']}] {item['title']}\n   {item['url']}")
-    if args.browser:
+        done = " done" if item["url"] in load_completions() else ""
+        print(f"{idx}. [{item['type']}]{done} {item['title']}\n   {item['url']}")
+    if args.interactive:
+        interactive_walk(links)
+    elif args.auto_walk:
+        auto_walk(links, headed=args.headed, slow_ms=args.slow_ms, read_seconds=args.read_seconds, video_seconds=args.video_seconds, mark=args.mark_complete)
+    elif args.browser:
         open_browser(links, headed=args.headed, slow_ms=args.slow_ms)
     else:
-        print("Browser not opened. Use --browser --headed from a desktop/VNC session, or open the HTML file manually.")
+        print("Browser not opened. Use --browser --headed, --auto-walk, or open the HTML file manually.")
     return 0
 
 

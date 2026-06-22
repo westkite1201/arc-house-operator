@@ -28,6 +28,7 @@ EXPLORER_URL = "https://testnet.arcscan.app"
 DEFAULT_STATE_DIR = Path(__file__).resolve().parents[1] / "state"
 STATE_DIR = Path(__import__("os").environ.get("ARC_HOUSE_STATE_DIR", str(DEFAULT_STATE_DIR)))
 STATE_PATH = STATE_DIR / "arc_house_daily_state.json"
+COMPLETIONS_PATH = STATE_DIR / "completions.json"
 
 UA = "Mozilla/5.0 (Hermes Arc House safe monitor; public pages only)"
 
@@ -130,6 +131,13 @@ def load_state():
         return {}
 
 
+def load_completions():
+    try:
+        return json.loads(COMPLETIONS_PATH.read_text(encoding="utf-8"))
+    except Exception:
+        return {}
+
+
 def save_state(state):
     STATE_PATH.parent.mkdir(parents=True, exist_ok=True)
     STATE_PATH.write_text(json.dumps(state, ensure_ascii=False, indent=2))
@@ -169,6 +177,9 @@ def main() -> int:
 
     read_urls = [x["url"] for x in reads]
     video_urls = [x["url"] for x in videos]
+    completions = load_completions()
+    pending_count = sum(1 for url in read_urls + video_urls if url not in completions)
+    completed_count = sum(1 for url in read_urls + video_urls if url in completions)
     new_reads = [x for x in reads if x["url"] not in state.get("seen_urls", [])]
     new_videos = [x for x in videos if x["url"] not in state.get("seen_urls", [])]
 
@@ -182,6 +193,7 @@ def main() -> int:
     lines.append(f"- Arc RPC: {'정상' if rpc_ok else '이상'} ({rpc_msg})")
     lines.append(f"- Faucet: {'접속 가능' if faucet_ok else '확인 필요'} ({faucet_msg})")
     lines.append(f"- Explorer: {'접속 가능' if explorer_ok else '확인 필요'} ({explorer_msg})")
+    lines.append(f"- Queue: 완료 {completed_count} / 미완료 {pending_count}")
     lines.append("")
     lines.append("읽을 콘텐츠 5개")
     if reads:
@@ -208,6 +220,8 @@ def main() -> int:
     lines.append("반자동 브라우저 헬퍼")
     lines.append("- HTML queue: /home/ubuntu/repos/arc-house-operator/state/arc_house_today_links.html")
     lines.append("- Desktop/VNC에서 실행: /home/ubuntu/repos/arc-house-operator/scripts/supervised_opener.py --browser --headed")
+    lines.append("- 자동 page-walk: /home/ubuntu/repos/arc-house-operator/scripts/supervised_opener.py --skip-completed --auto-walk --mark-complete --headed")
+    lines.append("- 세션 체크: /home/ubuntu/repos/arc-house-operator/scripts/session_check.py --headed")
 
     if rules_changed and state.get("rules_summary"):
         lines.append("")

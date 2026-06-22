@@ -43,6 +43,21 @@ Desktop/VNC browser helper:
 python3 scripts/supervised_opener.py --browser --headed
 ```
 
+More automated operator run, still no comment/post/wallet/sign/API spoofing:
+
+```bash
+python3 scripts/session_check.py --headed
+python3 scripts/supervised_opener.py --skip-completed --auto-walk --mark-complete --headed
+```
+
+This sequentially opens official links in the persistent profile, waits per page, and records local completion state in `state/completions.json`. It does **not** call points APIs or create engagement.
+
+Manual completion mode:
+
+```bash
+python3 scripts/supervised_opener.py --skip-completed --interactive
+```
+
 State defaults to `./state`. Override if needed:
 
 ```bash

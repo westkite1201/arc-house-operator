@@ -31,3 +31,25 @@ def test_safety_note_rejects_risky_automation_language():
     assert "no wallet connect" in note
     assert "no captcha" in note
     assert "no points api" in note
+
+
+def test_completion_tracking_round_trip(tmp_path, monkeypatch):
+    completions_path = tmp_path / "completions.json"
+    monkeypatch.setattr(supervised_opener, "COMPLETIONS_PATH", completions_path)
+    item = {"type": "read", "title": "Arc Memo", "url": "https://community.arc.io/en/public/blogs/memo"}
+
+    record = supervised_opener.mark_completed(item, mode="test")
+
+    assert record["mode"] == "test"
+    assert supervised_opener.load_completions()[item["url"]]["title"] == "Arc Memo"
+    assert supervised_opener.pending_links([item]) == []
+
+
+def test_pending_links_filters_completed(tmp_path, monkeypatch):
+    completions_path = tmp_path / "completions.json"
+    monkeypatch.setattr(supervised_opener, "COMPLETIONS_PATH", completions_path)
+    done = {"type": "read", "title": "Done", "url": "https://community.arc.io/en/public/blogs/done"}
+    todo = {"type": "video", "title": "Todo", "url": "https://community.arc.io/en/public/videos/todo"}
+    supervised_opener.mark_completed(done, mode="test")
+
+    assert supervised_opener.pending_links([done, todo]) == [todo]
