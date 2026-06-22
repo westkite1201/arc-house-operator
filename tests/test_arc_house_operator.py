@@ -45,6 +45,28 @@ def test_completion_tracking_round_trip(tmp_path, monkeypatch):
     assert supervised_opener.pending_links([item]) == []
 
 
+def test_guided_completion_records_operator_evidence(tmp_path, monkeypatch):
+    completions_path = tmp_path / "completions.json"
+    monkeypatch.setattr(supervised_opener, "COMPLETIONS_PATH", completions_path)
+    item = {"type": "read", "title": "Arc Memo", "url": "https://community.arc.io/en/public/blogs/memo"}
+
+    record = supervised_opener.mark_completed_with_evidence(
+        item,
+        mode="operator_confirmed_guided",
+        evidence={
+            "operator_elapsed_seconds": 61.2,
+            "minimum_guidance_seconds": 45,
+            "operator_note": "read manually",
+        },
+    )
+
+    stored = supervised_opener.load_completions()[item["url"]]
+    assert record["mode"] == "operator_confirmed_guided"
+    assert stored["operator_elapsed_seconds"] == 61.2
+    assert stored["minimum_guidance_seconds"] == 45
+    assert stored["operator_note"] == "read manually"
+
+
 def test_pending_links_filters_completed(tmp_path, monkeypatch):
     completions_path = tmp_path / "completions.json"
     monkeypatch.setattr(supervised_opener, "COMPLETIONS_PATH", completions_path)

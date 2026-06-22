@@ -58,6 +58,18 @@ Manual completion mode:
 python3 scripts/supervised_opener.py --skip-completed --interactive
 ```
 
+Guided verification mode opens one official link at a time and records only
+operator-confirmed evidence. It does **not** synthesize scroll patterns, watch
+events, engagement events, or points API calls:
+
+```bash
+python3 scripts/supervised_opener.py --skip-completed --guided --headed
+```
+
+Use this when you need a local audit trail that the operator actually reviewed
+the page: elapsed seconds, minimum guidance seconds, and an optional note are
+stored in `state/completions.json` with `mode=operator_confirmed_guided`.
+
 State defaults to `./state`. Override if needed:
 
 ```bash
