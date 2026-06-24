@@ -71,6 +71,31 @@ def mark_completed(item: dict[str, str], mode: str, completions: dict[str, dict[
     return record
 
 
+def mark_completed_with_evidence(
+    item: dict[str, str],
+    mode: str,
+    evidence: dict[str, str | int | float],
+    completions: dict[str, dict[str, str]] | None = None,
+) -> dict[str, str | int | float]:
+    """Record an operator-confirmed completion with local verification evidence.
+
+    Evidence is deliberately local and operator-entered. The helper does not
+    synthesize scroll, dwell, watch, or points events.
+    """
+    completions = completions if completions is not None else load_completions()
+    record: dict[str, str | int | float] = {
+        "title": item["title"],
+        "type": item["type"],
+        "url": item["url"],
+        "completed_at": utc_now(),
+        "mode": mode,
+        **evidence,
+    }
+    completions[item["url"]] = record  # type: ignore[assignment]
+    save_completions(completions)  # type: ignore[arg-type]
+    return record
+
+
 def pending_links(links: list[dict[str, str]], completions: dict[str, dict[str, str]] | None = None) -> list[dict[str, str]]:
     completions = completions if completions is not None else load_completions()
     return [item for item in links if item["url"] not in completions]
@@ -182,6 +207,53 @@ def interactive_walk(links: list[dict[str, str]]) -> None:
     save_completions(completions)
 
 
+def guided_verification_walk(links: list[dict[str, str]], headed: bool, slow_ms: int, min_read_seconds: int, min_video_seconds: int) -> None:
+    """Open official links one by one and require operator-confirmed evidence.
+
+    This is a verification workflow, not behavior simulation: the script never
+    scrolls, watches, clicks engagement controls, calls points APIs, or marks a
+    page complete without an operator checkpoint.
+    """
+    try:
+        p, context = _launch_context(headed=headed, slow_ms=slow_ms)
+    except Exception as exc:  # pragma: no cover
+        raise RuntimeError("playwright_or_chromium_missing") from exc
+    completions = load_completions()
+    try:
+        page = context.new_page()
+        page.goto(BASE, wait_until="domcontentloaded", timeout=45_000)
+        print(SAFETY_NOTE.strip())
+        print("Guided mode: 직접 읽기/시청/스크롤 후 터미널에서 확인만 기록합니다. 자동 스크롤/포인트 이벤트 없음.")
+        for idx, item in enumerate(links, 1):
+            min_seconds = min_video_seconds if item["type"] == "video" else min_read_seconds
+            print(f"\n{idx}/{len(links)} [{item['type']}] {item['title']}\n{item['url']}")
+            page.goto(item["url"], wait_until="domcontentloaded", timeout=60_000)
+            started = time.monotonic()
+            print(f"브라우저에서 직접 확인하세요. 최소 확인 가이드: {min_seconds}s")
+            answer = input("완료 후 Enter, skip은 s: ").strip().lower()
+            elapsed = round(time.monotonic() - started, 1)
+            if answer == "s":
+                print(f"skipped after {elapsed}s")
+                continue
+            if elapsed < min_seconds:
+                confirm = input(f"{elapsed}s만 경과했습니다. 그래도 직접 확인 완료가 맞으면 'yes' 입력: ").strip().lower()
+                if confirm != "yes":
+                    print("not_marked")
+                    continue
+            note = input("선택 메모(읽은 섹션/영상 확인 등, 빈칸 가능): ").strip()
+            evidence = {
+                "operator_elapsed_seconds": elapsed,
+                "minimum_guidance_seconds": min_seconds,
+                "operator_note": note,
+            }
+            mark_completed_with_evidence(item, mode="operator_confirmed_guided", evidence=evidence, completions=completions)
+            print(f"marked_complete operator_elapsed_seconds={elapsed}")
+        save_completions(completions)
+    finally:
+        context.close()
+        p.stop()
+
+
 def main() -> int:
     ap = argparse.ArgumentParser()
     ap.add_argument("--read-limit", type=int, default=5)
@@ -191,6 +263,7 @@ def main() -> int:
     ap.add_argument("--slow-ms", type=int, default=150)
     ap.add_argument("--skip-completed", action="store_true", help="only include links not present in completions.json")
     ap.add_argument("--interactive", action="store_true", help="prompt operator to mark each link complete")
+    ap.add_argument("--guided", action="store_true", help="open one official link at a time and require operator-confirmed verification evidence")
     ap.add_argument("--auto-walk", action="store_true", help="sequentially visit official links and wait; does not spoof APIs")
     ap.add_argument("--mark-complete", action="store_true", help="with --auto-walk, locally mark visited links complete")
     ap.add_argument("--read-seconds", type=int, default=45)
@@ -208,12 +281,15 @@ def main() -> int:
         print(f"{idx}. [{item['type']}]{done} {item['title']}\n   {item['url']}")
     if args.interactive:
         interactive_walk(links)
+    elif args.guided:
+        guided_verification_walk(links, headed=args.headed, slow_ms=args.slow_ms, min_read_seconds=args.read_seconds, min_video_seconds=args.video_seconds)
     elif args.auto_walk:
+        print("WARNING: --auto-walk only loads official pages. Prefer --guided for operator-confirmed verification evidence.")
         auto_walk(links, headed=args.headed, slow_ms=args.slow_ms, read_seconds=args.read_seconds, video_seconds=args.video_seconds, mark=args.mark_complete)
     elif args.browser:
         open_browser(links, headed=args.headed, slow_ms=args.slow_ms)
     else:
-        print("Browser not opened. Use --browser --headed, --auto-walk, or open the HTML file manually.")
+        print("Browser not opened. Use --browser --headed, --guided --headed, --auto-walk, or open the HTML file manually.")
     return 0
 
 
