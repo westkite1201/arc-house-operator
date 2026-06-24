@@ -14,6 +14,10 @@ This repo keeps Arc House monitoring and browser-assist automation out of Hermes
 
 ## Safety boundary
 
+Default operating mode is **one operator account, one browser profile, one
+manual testnet wallet**. See `docs/single-account-runbook.md` for the full
+runbook and the rationale for avoiding multi-account rotation.
+
 Allowed:
 
 - Public official page monitoring.
@@ -29,6 +33,7 @@ Not allowed:
 - Posting/commenting automation.
 - Points API spoofing or hidden event calls.
 - Claim/airdrop checker automation.
+- Account/wallet/proxy rotation.
 
 ## Quick start
 
